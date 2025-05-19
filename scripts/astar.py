@@ -107,7 +107,7 @@ class AStarPlannerNode(object):
         _map_dir = os.path.dirname(map_yaml)
         _map     = read_yaml(map_yaml)
         relative_img = _map['image']                           # e.g. "mymap.pgm"
-        pgm      = os.path.join(_map_dir, relative_img)     # /…/maps/mymap.pgm
+        pgm      = os.path.join(_map_dir, relative_img)
         with open(pgm,'rb') as f: rast=read_pgm(f)
         self.grid=threshold_map(rast)
         self.dist_map=distance_transform_edt(self.grid==0)
