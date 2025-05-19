@@ -9,6 +9,7 @@ Subscribes to:
   - /amcl_pose for current rover pose
 """
 import rospy
+import os
 import math
 import heapq
 import yaml
@@ -102,9 +103,11 @@ def a_star(start,goal,grid,dist_map,res):
 class AStarPlannerNode(object):
     def __init__(self):
         rospy.init_node('astar_planner')
-        map_yaml=rospy.get_param('~map_yaml','mymap.yaml')
-        m=read_yaml(map_yaml)
-        pgm=m['image']; self.res=m['resolution']
+        map_yaml = rospy.get_param('~map_yaml')
+        _map_dir = os.path.dirname(map_yaml)
+        _map     = read_yaml(map_yaml)
+        relative_img = _map['image']                           # e.g. "mymap.pgm"
+        pgm      = os.path.join(_map_dir, relative_img)     # /…/maps/mymap.pgm
         with open(pgm,'rb') as f: rast=read_pgm(f)
         self.grid=threshold_map(rast)
         self.dist_map=distance_transform_edt(self.grid==0)

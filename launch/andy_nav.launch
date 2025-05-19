@@ -15,7 +15,7 @@
   <include file="$(find jetracer)/launch/amcl.launch" />
 
   <!-- Launch A* planner node -->
-  <node name="astar_planner" pkg="astar_planner" type="astar_ros_node.py" output="screen">
+  <node name="astar_andy" pkg="jetracer" type="astar.py" output="screen">
     <param name="map_yaml" value="$(arg map_file)"/>
   </node>
 
