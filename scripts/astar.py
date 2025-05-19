@@ -39,7 +39,7 @@ def read_pgm(pgmf):
     return data.reshape((height, width))
 
 def threshold_map(raster):
-    return np.where(raster == 254, 0, 1)
+    return (raster <= 250).astype(np.uint8)
 
 class Node:
     def __init__(self, x, y, theta, cost, parent):
@@ -60,6 +60,9 @@ def is_collision(x, y, grid):
     return grid[ix, iy] == 1
 
 def a_star(start, goal, grid, dist_map, res):
+    if grid[goal.x][goal.y] == 1:
+        rospy.logerr("[A*] goal cell (%d,%d) is occupied!", goal.x, goal.y)
+        return
     tol_px = 0.25 / res
     ang_vel = 0.6; swing_vel = 0.2 / res; vel = 0.5 / res
     cost_scale = 1.0; back_penalty = 2.0; swing_penalty = 1.0
@@ -141,7 +144,14 @@ class AStarPlannerNode(object):
             msg.pose.orientation.w])
         start = Node(sx, sy, sth, 0, None)
         goal = Node(gx, gy, gth, 0, None)
+
+        rospy.loginfo("[A*] start=(%.1f,%.1f,%.2f) goal=(%.1f,%.1f,%.2f)",
+                      sx, sy, sth, gx, gy, gth)
         path_states = a_star(start, goal, self.grid, self.dist_map, self.res)
+        rospy.loginfo("[A*] planner returned %d states", len(path_states))
+        if not path_states:
+            rospy.logwarn("[A*] no path found!")
+            return
         # publish Path
         ros_path = Path(); ros_path.header = Header(frame_id='map')
         for n in path_states:
