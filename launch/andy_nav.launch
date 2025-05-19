@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+
+<launch>
+  <include file="$(find jetracer)/launch/jetracer.launch" />
+
+<include file="$(find jetracer)/launch/lidar.launch" />
+
+<include file="$(find jetracer)/launch/csi_camera.launch" />
+
+<!-- Start the map server function pack and publish the map -->
+<arg name="map_file" default="$(find jetracer)/maps/mymap.yaml"/>
+<node name="map_server" pkg="map_server" type="map_server" args="$(arg map_file)" />
+
+  <!-- Start AMCL for localization -->
+  <include file="$(find jetracer)/launch/amcl.launch" />
+
+  <!-- Launch A* planner node -->
+  <node name="astar_planner" pkg="astar_planner" type="astar_ros_node.py" output="screen">
+    <param name="map_yaml" value="$(arg map_file)"/>
+  </node>
+
+  <!-- Remap cmd_vel to follow planner actions -->
+  <remap from="/cmd_vel" to="/cmd_vel_actions"/>
+</launch>
