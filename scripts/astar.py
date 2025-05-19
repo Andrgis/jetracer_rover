@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
 ROS Melodic node wrapping the A* planner.
 Publishes two topics:
@@ -15,10 +16,13 @@ import os
 import yaml
 import numpy as np
 from scipy.ndimage import distance_transform_edt
+import tf
+from tf import transformations
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Point, Quaternion, Twist
 from nav_msgs.msg import Path
 from std_msgs.msg import Header
 
+# Utility functions
 def read_yaml(filename):
     with open(filename) as f:
         return yaml.safe_load(f)
@@ -39,15 +43,25 @@ def read_pgm(pgmf):
     return data.reshape((height, width))
 
 def threshold_map(raster):
+    # treat values >250 as free (0), else occupied (1)
     return (raster <= 250).astype(np.uint8)
 
+def world_to_map(wx, wy, origin_x, origin_y, resolution, height):
+    px = (wx - origin_x) / resolution
+    py = (wy - origin_y) / resolution
+    ix = int(height - 1 - py)
+    iy = int(px)
+    return ix, iy
+
+# Node class for A*
 class Node:
     def __init__(self, x, y, theta, cost, parent):
         self.x = x; self.y = y; self.theta = theta; self.cost = cost; self.parent = parent
     def __lt__(self, other): return self.cost < other.cost
 
+# Heuristic (Euclidean + angle)
 def heuristic(n, g):
-    return math.hypot(g.x-n.x, g.y-n.y) + abs(g.theta-n.theta)
+    return math.hypot(g.x - n.x, g.y - n.y) + abs(g.theta - n.theta)
 
 def proximity_penalty(dist_map, x, y):
     clearance = 10.0; w = 20.0
@@ -56,15 +70,16 @@ def proximity_penalty(dist_map, x, y):
 
 def is_collision(x, y, grid):
     ix, iy = int(x), int(y)
-    if ix < 0 or iy < 0 or ix >= grid.shape[0] or iy >= grid.shape[1]: return True
+    if ix < 0 or iy < 0 or ix >= grid.shape[0] or iy >= grid.shape[1]:
+        return True
     return grid[ix, iy] == 1
 
+# A* planner
 def a_star(start, goal, grid, dist_map, res):
-    if grid[goal.x][goal.y] == 1:
-        rospy.logerr("[A*] goal cell (%d,%d) is occupied!", goal.x, goal.y)
-        return
-    tol_px = 0.25 / res
-    ang_vel = 0.6; swing_vel = 0.2 / res; vel = 0.5 / res
+    # action definitions
+    ang_vel = 0.6
+    swing_vel = 0.2 / res
+    vel = 0.5 / res
     cost_scale = 1.0; back_penalty = 2.0; swing_penalty = 1.0
     actions = [
         (vel, 0.0, vel * 0.5 * cost_scale),
@@ -74,49 +89,63 @@ def a_star(start, goal, grid, dist_map, res):
         (-swing_vel, ang_vel, back_penalty * swing_vel * swing_penalty * cost_scale),
         (-swing_vel, -ang_vel, back_penalty * swing_vel * swing_penalty * cost_scale)
     ]
+    tol_px = 0.5 / res
+    tol_angle = 0.6
     open_list = []
     heapq.heappush(open_list, (0, start))
     closed = set()
-    while open_list:
+    max_iter = 200000
+    i = 0
+    while open_list and i < max_iter:
+        i += 1
         _, cur = heapq.heappop(open_list)
         key = (int(cur.x), int(cur.y), round(cur.theta, 2))
-        if key in closed: continue
+        if key in closed:
+            continue
         closed.add(key)
-        if abs(cur.x - goal.x) < tol_px and abs(cur.y - goal.y) < tol_px and abs(cur.theta - goal.theta) < 0.6:
+        # goal check
+        if abs(cur.x - goal.x) < tol_px and abs(cur.y - goal.y) < tol_px and abs(cur.theta - goal.theta) < tol_angle:
             path = []
             while cur:
                 path.append(cur)
                 cur = cur.parent
             return path[::-1]
+        # expand
         for v, w, c in actions:
             new_theta = cur.theta + w
             if w == 0:
-                dx = v * math.cos(cur.theta); dy = v * math.sin(cur.theta)
+                dx = v * math.cos(cur.theta)
+                dy = v * math.sin(cur.theta)
             else:
                 dx = v / w * (math.sin(new_theta) - math.sin(cur.theta))
                 dy = -v / w * (math.cos(new_theta) - math.cos(cur.theta))
-            nx, ny = int(cur.x + dx), int(cur.y + dy)
+            nx, ny = cur.x + dx, cur.y + dy
             if not is_collision(nx, ny, grid):
                 pen = proximity_penalty(dist_map, nx, ny)
                 nc = cur.cost + c + pen
-                node = Node(nx, ny, round(new_theta, 2), nc, cur)
+                node = Node(nx, ny, new_theta, nc, cur)
                 f = nc + heuristic(node, goal)
                 heapq.heappush(open_list, (f, node))
     return []
 
+# ROS node
 class AStarPlannerNode(object):
     def __init__(self):
         rospy.init_node('astar_planner')
-        map_yaml = rospy.get_param('~map_yaml', 'mymap.yaml')
-        # resolve YAML directory
+        # load map
+        map_yaml = rospy.get_param('~map_yaml')
         map_dir = os.path.dirname(map_yaml)
         m = read_yaml(map_yaml)
         yaml_img = m['image']
         pgm_path = os.path.join(map_dir, yaml_img)
         self.res = m['resolution']
-        with open(pgm_path, 'rb') as f: raster = read_pgm(f)
+        self.origin_x, self.origin_y, self.origin_th = m['origin']
+        with open(pgm_path, 'rb') as f:
+            raster = read_pgm(f)
+        self.height, self.width = raster.shape
         self.grid = threshold_map(raster)
         self.dist_map = distance_transform_edt(self.grid == 0)
+        # publishers and subscribers
         self.path_pub = rospy.Publisher('planned_path', Path, queue_size=1)
         self.cmd_pub = rospy.Publisher('cmd_vel_actions', Twist, queue_size=1)
         rospy.Subscriber('move_base_simple/goal', PoseStamped, self.goal_cb)
@@ -124,48 +153,49 @@ class AStarPlannerNode(object):
         rospy.spin()
 
     def goal_cb(self, msg):
-        # get current pose from amcl (PoseWithCovarianceStamped)
+        # get start pose in world coords
         amcl = rospy.wait_for_message('amcl_pose', PoseWithCovarianceStamped)
-        sx = amcl.pose.pose.position.x / self.res
-        sy = amcl.pose.pose.position.y / self.res
-        # orientation to yaw
-        import tf
-        (_, _, sth) = tf.transformations.euler_from_quaternion([
+        wx_s = amcl.pose.pose.position.x
+        wy_s = amcl.pose.pose.position.y
+        _, _, th_s = tf.transformations.euler_from_quaternion([
             amcl.pose.pose.orientation.x,
             amcl.pose.pose.orientation.y,
             amcl.pose.pose.orientation.z,
             amcl.pose.pose.orientation.w])
-        gx = msg.pose.position.x / self.res
-        gy = msg.pose.position.y / self.res
-        (_, _, gth) = tf.transformations.euler_from_quaternion([
+        wx_g = msg.pose.position.x
+        wy_g = msg.pose.position.y
+        _, _, th_g = tf.transformations.euler_from_quaternion([
             msg.pose.orientation.x,
             msg.pose.orientation.y,
             msg.pose.orientation.z,
             msg.pose.orientation.w])
-        start = Node(sx, sy, sth, 0, None)
-        goal = Node(gx, gy, gth, 0, None)
-
-        rospy.loginfo("[A*] start=(%.1f,%.1f,%.2f) goal=(%.1f,%.1f,%.2f)",
-                      sx, sy, sth, gx, gy, gth)
+        # convert to map indices
+        ix_s, iy_s = world_to_map(wx_s, wy_s, self.origin_x, self.origin_y, self.res, self.height)
+        ix_g, iy_g = world_to_map(wx_g, wy_g, self.origin_x, self.origin_y, self.res, self.height)
+        start = Node(ix_s, iy_s, th_s, 0, None)
+        goal = Node(ix_g, iy_g, th_g, 0, None)
+        rospy.loginfo("[A*] start=(%d,%d,%.2f) goal=(%d,%d,%.2f)", ix_s, iy_s, th_s, ix_g, iy_g, th_g)
         path_states = a_star(start, goal, self.grid, self.dist_map, self.res)
         rospy.loginfo("[A*] planner returned %d states", len(path_states))
         if not path_states:
             rospy.logwarn("[A*] no path found!")
             return
-        # publish Path
+        # publish planned_path in world coords
         ros_path = Path(); ros_path.header = Header(frame_id='map')
         for n in path_states:
             ps = PoseStamped(); ps.header = ros_path.header
-            ps.pose.position = Point(n.x * self.res, n.y * self.res, 0)
-            q = tf.transformations.quaternion_from_euler(0, 0, n.theta)
-            ps.pose.orientation = Quaternion(*q)
+            wx = self.origin_x + n.y * self.res
+            wy = self.origin_y + (self.height - 1 - n.x) * self.res
+            ps.pose.position = Point(wx, wy, 0)
+            quat = tf.transformations.quaternion_from_euler(0, 0, n.theta)
+            ps.pose.orientation = Quaternion(*quat)
             ros_path.poses.append(ps)
         self.path_pub.publish(ros_path)
-        # publish Twist actions
-        for i in range(len(path_states)-1):
-            cur = path_states[i]; nxt = path_states[i+1]
-            dx = (nxt.x - cur.x) * self.res
-            dy = (nxt.y - cur.y) * self.res
+        # publish cmd_vel_actions
+        for i in range(len(path_states) - 1):
+            cur = path_states[i]; nxt = path_states[i + 1]
+            dx = (nxt.y - cur.y) * self.res
+            dy = ((self.height - 1 - nxt.x) - (self.height - 1 - cur.x)) * self.res
             theta = cur.theta
             twist = Twist()
             twist.linear.x = math.hypot(dx, dy)
