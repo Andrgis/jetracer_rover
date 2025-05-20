@@ -84,12 +84,12 @@ def a_star(start, goal, grid, dist_map, res):
     vel = 0.5 / res
     cost_scale = 1.0; back_penalty = 2.0; swing_penalty = 1.0
     actions = [
-        (vel, 0.0, vel * 0.5 * cost_scale),
-        (swing_vel, ang_vel, swing_vel * swing_penalty * cost_scale),
-        (swing_vel, -ang_vel, swing_vel * swing_penalty * cost_scale),
-        (-vel, 0.0, back_penalty * vel * 0.5 * cost_scale),
-        (-swing_vel, ang_vel, back_penalty * swing_vel * swing_penalty * cost_scale),
-        (-swing_vel, -ang_vel, back_penalty * swing_vel * swing_penalty * cost_scale)
+        (vel, 0.0, vel * 0.5 * cost_scale), # forward
+        (swing_vel, ang_vel, swing_vel * swing_penalty * cost_scale), # Left forward
+        (swing_vel, -ang_vel, swing_vel * swing_penalty * cost_scale), # Right forward
+        (-vel, 0.0, back_penalty * vel * 0.5 * cost_scale), # backward
+        (-swing_vel, ang_vel, back_penalty * swing_vel * swing_penalty * cost_scale), # Right backward
+        (-swing_vel, -ang_vel, back_penalty * swing_vel * swing_penalty * cost_scale) # Left backward
     ]
     tol_px = 0.5 / res
     tol_angle = 0.6
@@ -187,13 +187,22 @@ class AStarPlannerNode(object):
         ros_path = Path(); ros_path.header = Header(frame_id='map')
         for n in path_states:
             ps = PoseStamped(); ps.header = ros_path.header
-            wx = self.origin_x + n.y * self.res
-            wy = self.origin_y + (self.height - 1 - n.x) * self.res
+            wx = n.y
+            wy = n.x
             ps.pose.position = Point(wx, wy, 0)
             quat = tf.transformations.quaternion_from_euler(0, 0, n.theta)
             ps.pose.orientation = Quaternion(*quat)
             ros_path.poses.append(ps)
         self.path_pub.publish(ros_path)
+        #for n in path_states:
+        #    ps = PoseStamped(); ps.header = ros_path.header
+        #    wx = self.origin_x + n.y * self.res
+        #    wy = self.origin_y + (self.height - 1 - n.x) * self.res
+        #    ps.pose.position = Point(wx, wy, 0)
+        #    quat = tf.transformations.quaternion_from_euler(0, 0, n.theta)
+        #    ps.pose.orientation = Quaternion(*quat)
+        #    ros_path.poses.append(ps)
+        #self.path_pub.publish(ros_path)
         # publish cmd_vel_actions
         for a in path_actions:
             twist = Twist()
