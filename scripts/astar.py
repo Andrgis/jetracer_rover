@@ -150,7 +150,7 @@ class AStarPlannerNode(object):
         self.dist_map = distance_transform_edt(self.grid == 0)
         # publishers and subscribers
         self.path_pub = rospy.Publisher('planned_path', Path, queue_size=1)
-        self.cmd_pub = rospy.Publisher('cmd_vel_actions', Twist, queue_size=1)
+        self.cmd_pub = rospy.Publisher('cmd_vel', Twist, queue_size=1)
         rospy.Subscriber('move_base_simple/goal', PoseStamped, self.goal_cb)
         rospy.loginfo('A* planner ready')
         rospy.spin()
