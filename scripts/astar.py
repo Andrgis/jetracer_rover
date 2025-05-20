@@ -55,8 +55,10 @@ def world_to_map(wx, wy, origin_x, origin_y, resolution, height):
 
 # Node class for A*
 class Node:
-    def __init__(self, x, y, theta, cost, parent):
-        self.x = x; self.y = y; self.theta = theta; self.cost = cost; self.parent = parent
+    def __init__(self, x, y, theta, cost, parent, actions=None):
+        if actions is None:
+            actions = []
+        self.x = x; self.y = y; self.theta = theta; self.cost = cost; self.parent = parent; self.actions = actions
     def __lt__(self, other): return self.cost < other.cost
 
 # Heuristic (Euclidean + angle)
@@ -106,10 +108,11 @@ def a_star(start, goal, grid, dist_map, res):
         # goal check
         if abs(cur.x - goal.x) < tol_px and abs(cur.y - goal.y) < tol_px and abs(cur.theta - goal.theta) < tol_angle:
             path = []
+            action_path = cur.actions
             while cur:
                 path.append(cur)
                 cur = cur.parent
-            return path[::-1]
+            return path[::-1], action_path
         # expand
         for v, w, c in actions:
             new_theta = cur.theta + w
@@ -123,7 +126,7 @@ def a_star(start, goal, grid, dist_map, res):
             if not is_collision(nx, ny, grid):
                 pen = proximity_penalty(dist_map, nx, ny)
                 nc = cur.cost + c + pen
-                node = Node(nx, ny, new_theta, nc, cur)
+                node = Node(nx, ny, new_theta, nc, cur, cur.actions+[(v, w)])
                 f = nc + heuristic(node, goal)
                 heapq.heappush(open_list, (f, node))
     return []
@@ -175,7 +178,7 @@ class AStarPlannerNode(object):
         start = Node(ix_s, iy_s, th_s, 0, None)
         goal = Node(ix_g, iy_g, th_g, 0, None)
         rospy.loginfo("[A*] start=(%d,%d,%.2f) goal=(%d,%d,%.2f)", ix_s, iy_s, th_s, ix_g, iy_g, th_g)
-        path_states = a_star(start, goal, self.grid, self.dist_map, self.res)
+        path_states, path_actions = a_star(start, goal, self.grid, self.dist_map, self.res)
         rospy.loginfo("[A*] planner returned %d states", len(path_states))
         if not path_states:
             rospy.logwarn("[A*] no path found!")
@@ -192,16 +195,12 @@ class AStarPlannerNode(object):
             ros_path.poses.append(ps)
         self.path_pub.publish(ros_path)
         # publish cmd_vel_actions
-        for i in range(len(path_states) - 1):
-            cur = path_states[i]; nxt = path_states[i + 1]
-            dx = (nxt.y - cur.y) * self.res
-            dy = ((self.height - 1 - nxt.x) - (self.height - 1 - cur.x)) * self.res
-            theta = cur.theta
+        for a in path_actions:
             twist = Twist()
-            twist.linear.x = math.hypot(dx, dy)
-            twist.angular.z = math.atan2(dy, dx) - theta
+            twist.linear.x = a[0] * self.res
+            twist.angular.z = a[1]
             self.cmd_pub.publish(twist)
-            rospy.sleep(0.1)
+            rospy.sleep(1.0)
 
 if __name__ == '__main__':
     try:
