@@ -59,7 +59,7 @@ class Node:
         if actions is None:
             actions = []
         self.x = x; self.y = y; self.theta = theta; self.cost = cost; self.parent = parent; self.actions = actions
-    def __lt__(self, other): return self.cost < other.cost
+    def __lt__(self, other): return self.cost < other.cost  # Defining comparision
 
 # Heuristic (Euclidean + angle)
 def heuristic(n, g):
@@ -79,6 +79,7 @@ def is_collision(x, y, grid):
 # A* planner
 def a_star(start, goal, grid, dist_map, res):
     # action definitions
+    rospy.loginfo('Running A* path planning')
     ang_vel = 0.6
     swing_vel = 0.2 / res
     vel = 0.5 / res
@@ -101,12 +102,13 @@ def a_star(start, goal, grid, dist_map, res):
     while open_list and i < max_iter:
         i += 1
         _, cur = heapq.heappop(open_list)
-        key = (int(cur.x), int(cur.y), round(cur.theta, 2))
+        key = (cur.x//4, cur.y//4, (cur.theta*8)//(2*math.pi)%8)
         if key in closed:
             continue
         closed.add(key)
         # goal check
         if abs(cur.x - goal.x) < tol_px and abs(cur.y - goal.y) < tol_px and abs(cur.theta - goal.theta) < tol_angle:
+            rospy.loginfo('Found path after %d iterations', i)
             path = []
             action_path = cur.actions
             while cur:
@@ -175,11 +177,12 @@ class AStarPlannerNode(object):
         # convert to map indices
         ix_s, iy_s = world_to_map(wx_s, wy_s, self.origin_x, self.origin_y, self.res, self.height)
         ix_g, iy_g = world_to_map(wx_g, wy_g, self.origin_x, self.origin_y, self.res, self.height)
-        start = Node(ix_s, iy_s, th_s, 0, None)
-        goal = Node(ix_g, iy_g, th_g, 0, None)
+        start = Node(iy_s, ix_s, th_s, 0, None)
+        goal = Node(iy_g, ix_g, th_g, 0, None)
         rospy.loginfo("[A*] start=(%d,%d,%.2f) goal=(%d,%d,%.2f)", ix_s, iy_s, th_s, ix_g, iy_g, th_g)
         path_states, path_actions = a_star(start, goal, self.grid, self.dist_map, self.res)
         rospy.loginfo("[A*] planner returned %d states", len(path_states))
+        rospy.loginfo("[A*] actions planned: %s", path_actions)
         if not path_states:
             rospy.logwarn("[A*] no path found!")
             return
@@ -209,7 +212,7 @@ class AStarPlannerNode(object):
             twist.linear.x = a[0] * self.res
             twist.angular.z = a[1]
             self.cmd_pub.publish(twist)
-            rospy.sleep(1.0)
+            rospy.sleep(3.0)
 
 if __name__ == '__main__':
     try:
