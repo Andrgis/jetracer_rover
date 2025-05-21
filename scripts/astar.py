@@ -177,8 +177,8 @@ class AStarPlannerNode(object):
         # convert to map indices
         ix_s, iy_s = world_to_map(wx_s, wy_s, self.origin_x, self.origin_y, self.res, self.height)
         ix_g, iy_g = world_to_map(wx_g, wy_g, self.origin_x, self.origin_y, self.res, self.height)
-        start = Node(iy_s, ix_s, th_s, 0, None)
-        goal = Node(iy_g, ix_g, th_g, 0, None)
+        start = Node(ix_s, iy_s, th_s, 0, None)
+        goal = Node(ix_g, iy_g, th_g, 0, None)
         rospy.loginfo("[A*] start=(%d,%d,%.2f) goal=(%d,%d,%.2f)", ix_s, iy_s, th_s, ix_g, iy_g, th_g)
         path_states, path_actions = a_star(start, goal, self.grid, self.dist_map, self.res)
         rospy.loginfo("[A*] planner returned %d states", len(path_states))
