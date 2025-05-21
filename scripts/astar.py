@@ -49,8 +49,8 @@ def threshold_map(raster):
 def world_to_map(wx, wy, origin_x, origin_y, resolution, height):
     px = (wx - origin_x) / resolution
     py = (wy - origin_y) / resolution
-    ix = int(height - 1 - py)
-    iy = int(px)
+    ix = int(px)
+    iy = int(height - 1 - py)
     return ix, iy
 
 # Node class for A*
@@ -67,14 +67,14 @@ def heuristic(n, g):
 
 def proximity_penalty(dist_map, x, y):
     clearance = 10.0; w = 20.0
-    d = dist_map[int(x), int(y)]
+    d = dist_map[int(y), int(x)]
     return 0.0 if d >= clearance else w * (1.0 - d/clearance) ** 2
 
 def is_collision(x, y, grid):
     ix, iy = int(x), int(y)
-    if ix < 0 or iy < 0 or ix >= grid.shape[0] or iy >= grid.shape[1]:
+    if ix < 0 or iy < 0 or iy >= grid.shape[0] or ix >= grid.shape[1]:
         return True
-    return grid[ix, iy] == 1
+    return grid[iy, ix] == 1
 
 # A* planner
 def a_star(start, goal, grid, dist_map, res):
@@ -190,8 +190,8 @@ class AStarPlannerNode(object):
         ros_path = Path(); ros_path.header = Header(frame_id='map')
         for n in path_states:
             ps = PoseStamped(); ps.header = ros_path.header
-            wx = n.y
-            wy = n.x
+            wx = self.origin_x+n.x*self.res
+            wy = self.origin_y+(self.height-1-n.y)*self.res
             ps.pose.position = Point(wx, wy, 0)
             quat = tf.transformations.quaternion_from_euler(0, 0, n.theta)
             ps.pose.orientation = Quaternion(*quat)
