@@ -134,88 +134,233 @@ def a_star(start, goal, grid, dist_map, res):
     return []
 
 # ROS node
-class AStarPlannerNode(object):
+class MPCAStarPlannerNode(object):
     def __init__(self):
-        rospy.init_node('astar_planner')
-        # load map
+        rospy.init_node('mpc_astar_planner')
+
+        # MPC parameters
+        self.mpc_horizon = 5  # Number of steps to execute before replanning
+        self.control_rate = 5  # Hz for control loop
+        self.replan_distance_threshold = 0.3  # meters
+        self.replan_angle_threshold = 0.3  # radians
+
+        # Current plan storage
+        self.current_plan_states = []
+        self.current_plan_actions = []
+        self.plan_index = 0
+        self.goal_pose = None
+        self.executing_plan = False
+
+        # Load map (same as before)
         map_yaml = rospy.get_param('~map_yaml')
         map_dir = os.path.dirname(map_yaml)
         m = read_yaml(map_yaml)
         yaml_img = m['image']
         pgm_path = os.path.join(map_dir, yaml_img)
         self.res = m['resolution']
-        self.origin_x, self.origin_y, self.origin_th = m['origin']
+        self.origin_not_set = True
+
         with open(pgm_path, 'rb') as f:
             raster = read_pgm(f)
         self.height, self.width = raster.shape
         self.grid = threshold_map(raster)
         self.dist_map = distance_transform_edt(self.grid == 0)
-        # publishers and subscribers
+
+        # Publishers and subscribers
         self.path_pub = rospy.Publisher('planned_path', Path, queue_size=1)
         self.cmd_pub = rospy.Publisher('cmd_vel', Twist, queue_size=1)
         rospy.Subscriber('move_base_simple/goal', PoseStamped, self.goal_cb)
-        rospy.loginfo('A* planner ready')
+
+        # Timer for MPC control loop
+        self.control_timer = rospy.Timer(rospy.Duration(1.0/self.control_rate), self.control_loop)
+
+        rospy.loginfo('MPC A* planner ready')
         rospy.spin()
 
     def goal_cb(self, msg):
-        # get start pose in world coords
-        amcl = rospy.wait_for_message('amcl_pose', PoseWithCovarianceStamped)
-        wx_s = amcl.pose.pose.position.x
-        wy_s = amcl.pose.pose.position.y
-        _, _, th_s = tf.transformations.euler_from_quaternion([
-            amcl.pose.pose.orientation.x,
-            amcl.pose.pose.orientation.y,
-            amcl.pose.pose.orientation.z,
-            amcl.pose.pose.orientation.w])
-        wx_g = msg.pose.position.x
-        wy_g = msg.pose.position.y
+        """Handle new goal - start MPC planning"""
+        self.goal_pose = msg
+        self.executing_plan = True
+        self.plan_index = 0
+        self.replan()
+
+    def get_current_pose(self):
+        """Get current robot pose"""
+        try:
+            if self.origin_not_set:
+                amcl = rospy.wait_for_message('amcl_pose', PoseWithCovarianceStamped, timeout=1.0)
+                pose_msg = amcl.pose.pose
+                # Set origin on first call
+                self.origin_x = pose_msg.position.x
+                self.origin_y = pose_msg.position.y
+                self.origin_th = 0.0
+                self.origin_not_set = False
+            else:
+                odom = rospy.wait_for_message('odom_combined', PoseWithCovarianceStamped, timeout=1.0)
+                pose_msg = odom.pose.pose
+
+            wx = pose_msg.position.x
+            wy = pose_msg.position.y
+            _, _, th = tf.transformations.euler_from_quaternion([
+                pose_msg.orientation.x,
+                pose_msg.orientation.y,
+                pose_msg.orientation.z,
+                pose_msg.orientation.w])
+
+            return wx, wy, th
+        except rospy.ROSException:
+            rospy.logwarn("Failed to get current pose")
+            return None, None, None
+
+    def replan(self):
+        """Execute A* planning from current position to goal"""
+        if not self.goal_pose:
+            return False
+
+        # Get current pose
+        wx_s, wy_s, th_s = self.get_current_pose()
+        if wx_s is None:
+            return False
+
+        # Goal pose
+        wx_g = self.goal_pose.pose.position.x
+        wy_g = self.goal_pose.pose.position.y
         _, _, th_g = tf.transformations.euler_from_quaternion([
-            msg.pose.orientation.x,
-            msg.pose.orientation.y,
-            msg.pose.orientation.z,
-            msg.pose.orientation.w])
-        # convert to map indices
+            self.goal_pose.pose.orientation.x,
+            self.goal_pose.pose.orientation.y,
+            self.goal_pose.pose.orientation.z,
+            self.goal_pose.pose.orientation.w])
+
+        # Convert to map indices
         ix_s, iy_s = world_to_map(wx_s, wy_s, self.origin_x, self.origin_y, self.res, self.height)
         ix_g, iy_g = world_to_map(wx_g, wy_g, self.origin_x, self.origin_y, self.res, self.height)
+
         start = Node(ix_s, iy_s, th_s, 0, None)
         goal = Node(ix_g, iy_g, th_g, 0, None)
-        rospy.loginfo("[A*] start=(%d,%d,%.2f) goal=(%d,%d,%.2f)", ix_s, iy_s, th_s, ix_g, iy_g, th_g)
+
+        rospy.loginfo("[MPC A*] Replanning: start=(%d,%d,%.2f) goal=(%d,%d,%.2f)",
+                      ix_s, iy_s, th_s, ix_g, iy_g, th_g)
+
+        # Run A* planner
         path_states, path_actions = a_star(start, goal, self.grid, self.dist_map, self.res)
-        rospy.loginfo("[A*] planner returned %d states", len(path_states))
-        rospy.loginfo("[A*] actions planned: %s", path_actions)
+
         if not path_states:
-            rospy.logwarn("[A*] no path found!")
+            rospy.logwarn("[MPC A*] No path found!")
+            return False
+
+        # Store new plan
+        self.current_plan_states = path_states
+        self.current_plan_actions = path_actions
+        self.plan_index = 0
+
+        rospy.loginfo("[MPC A*] New plan with %d states", len(path_states))
+
+        # Publish visualization
+        self.publish_path_visualization()
+
+        return True
+
+    def publish_path_visualization(self):
+        """Publish the planned path for visualization"""
+        if not self.current_plan_states:
             return
-        # publish planned_path in world coords
-        ros_path = Path(); ros_path.header = Header(frame_id='map')
-        for n in path_states:
-            ps = PoseStamped(); ps.header = ros_path.header
-            wx = self.origin_x+n.x*self.res
-            wy = self.origin_y+(self.height-1-n.y)*self.res
+
+        ros_path = Path()
+        ros_path.header = Header(frame_id='map', stamp=rospy.Time.now())
+
+        for n in self.current_plan_states:
+            ps = PoseStamped()
+            ps.header = ros_path.header
+            wx = self.origin_x + n.x * self.res
+            wy = self.origin_y + (self.height - 1 - n.y) * self.res
             ps.pose.position = Point(wx, wy, 0)
             quat = tf.transformations.quaternion_from_euler(0, 0, n.theta)
             ps.pose.orientation = Quaternion(*quat)
             ros_path.poses.append(ps)
+
         self.path_pub.publish(ros_path)
-        #for n in path_states:
-        #    ps = PoseStamped(); ps.header = ros_path.header
-        #    wx = self.origin_x + n.y * self.res
-        #    wy = self.origin_y + (self.height - 1 - n.x) * self.res
-        #    ps.pose.position = Point(wx, wy, 0)
-        #    quat = tf.transformations.quaternion_from_euler(0, 0, n.theta)
-        #    ps.pose.orientation = Quaternion(*quat)
-        #    ros_path.poses.append(ps)
-        #self.path_pub.publish(ros_path)
-        # publish cmd_vel_actions
-        for a in path_actions:
+
+    def should_replan(self):
+        """Check if we should replan based on position error or completion"""
+        if not self.current_plan_states or self.plan_index >= len(self.current_plan_states):
+            return True
+
+        # Get current pose
+        wx_curr, wy_curr, th_curr = self.get_current_pose()
+        if wx_curr is None:
+            return False
+
+        # Check if we're close to goal
+        goal_dist = math.sqrt((wx_curr - self.goal_pose.pose.position.x)**2 +
+                              (wy_curr - self.goal_pose.pose.position.y)**2)
+        if goal_dist < 0.2:  # 20cm threshold
+            rospy.loginfo("[MPC A*] Goal reached!")
+            self.executing_plan = False
+            return False
+
+        # Check distance from expected position
+        if self.plan_index < len(self.current_plan_states):
+            expected_state = self.current_plan_states[self.plan_index]
+            wx_exp = self.origin_x + expected_state.x * self.res
+            wy_exp = self.origin_y + (self.height - 1 - expected_state.y) * self.res
+
+            pos_error = math.sqrt((wx_curr - wx_exp)**2 + (wy_curr - wy_exp)**2)
+            angle_error = abs(th_curr - expected_state.theta)
+
+            if pos_error > self.replan_distance_threshold or angle_error > self.replan_angle_threshold:
+                rospy.loginfo("[MPC A*] Replanning due to error: pos=%.3f, angle=%.3f",
+                              pos_error, angle_error)
+                return True
+
+        # Check if we've executed enough actions
+        if self.plan_index >= self.mpc_horizon:
+            rospy.loginfo("[MPC A*] Replanning after %d steps", self.mpc_horizon)
+            return True
+
+        return False
+
+    def control_loop(self, event):
+        """Main MPC control loop"""
+        if not self.executing_plan or not self.goal_pose:
+            # Send stop command
+            self.cmd_pub.publish(Twist())
+            return
+
+        # Check if we should replan
+        if self.should_replan():
+            if not self.replan():
+                # Stop if planning fails
+                self.cmd_pub.publish(Twist())
+                return
+
+        # Execute current action
+        if (self.plan_index < len(self.current_plan_actions) and
+                self.plan_index < len(self.current_plan_states)):
+
+            action = self.current_plan_actions[self.plan_index]
+
+            # Create control command
             twist = Twist()
-            twist.linear.x = a[0] * self.res *1.14
-            twist.angular.z = -a[1]*2.0
+            twist.linear.x = action[0] * self.res * 1.14  # Your scaling factors
+            twist.angular.z = -action[1] * 1.2
+
             self.cmd_pub.publish(twist)
-            rospy.sleep(3.0)
+
+            rospy.logdebug("[MPC A*] Executing action %d: v=%.3f, w=%.3f",
+                           self.plan_index, twist.linear.x, twist.angular.z)
+
+            self.plan_index += 1
+        else:
+            # No more actions, stop
+            self.cmd_pub.publish(Twist())
+
+    def shutdown(self):
+        """Clean shutdown"""
+        self.cmd_pub.publish(Twist())  # Stop robot
+        rospy.loginfo("[MPC A*] Shutting down")
 
 if __name__ == '__main__':
     try:
-        AStarPlannerNode()
+        planner = MPCAStarPlannerNode()
     except rospy.ROSInterruptException:
         pass
