@@ -210,7 +210,7 @@ class AStarPlannerNode(object):
         for a in path_actions:
             twist = Twist()
             twist.linear.x = a[0] * self.res
-            twist.angular.z = a[1]
+            twist.angular.z = -a[1]
             self.cmd_pub.publish(twist)
             rospy.sleep(3.0)
 
