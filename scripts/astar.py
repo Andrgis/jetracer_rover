@@ -93,7 +93,7 @@ def a_star(start, goal, grid, dist_map, res):
         (-swing_vel, -ang_vel, back_penalty * swing_vel * swing_penalty * cost_scale) # Left backward
     ]
     tol_px = 0.5 / res
-    tol_angle = 0.6
+    tol_angle = 0.5
     open_list = []
     heapq.heappush(open_list, (0, start))
     closed = set()
@@ -210,7 +210,7 @@ class AStarPlannerNode(object):
         for a in path_actions:
             twist = Twist()
             twist.linear.x = a[0] * self.res
-            twist.angular.z = -a[1]
+            twist.angular.z = -a[1]*2.0
             self.cmd_pub.publish(twist)
             rospy.sleep(3.0)
 
