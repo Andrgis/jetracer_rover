@@ -80,7 +80,7 @@ def is_collision(x, y, grid):
 def a_star(start, goal, grid, dist_map, res):
     # action definitions
     rospy.loginfo('Running A* path planning')
-    ang_vel = 0.6
+    ang_vel = 0.5
     swing_vel = 0.2 / res
     vel = 0.5 / res
     cost_scale = 1.0; back_penalty = 2.0; swing_penalty = 1.0
@@ -93,7 +93,7 @@ def a_star(start, goal, grid, dist_map, res):
         (-swing_vel, -ang_vel, back_penalty * swing_vel * swing_penalty * cost_scale) # Left backward
     ]
     tol_px = 0.5 / res
-    tol_angle = 0.5
+    tol_angle = 0.6
     open_list = []
     heapq.heappush(open_list, (0, start))
     closed = set()
@@ -209,7 +209,7 @@ class AStarPlannerNode(object):
         # publish cmd_vel_actions
         for a in path_actions:
             twist = Twist()
-            twist.linear.x = a[0] * self.res
+            twist.linear.x = a[0] * self.res *1.14
             twist.angular.z = -a[1]*2.0
             self.cmd_pub.publish(twist)
             rospy.sleep(3.0)
