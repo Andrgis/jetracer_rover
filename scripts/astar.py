@@ -53,12 +53,22 @@ def world_to_map(wx, wy, origin_x, origin_y, resolution, height):
     iy = int(height - 1 - py)
     return ix, iy
 
+def T_from_pose(x,y,th):
+    T = np.array([[math.cos(th), -math.sin(th), x],
+                  [math.sin(th), math.cos(th), y],
+                  [0.0, 0.0, 1.0]])
+    return T
+
+def pose_from_T(T):
+    x = T[0, 2]
+    y = T[1, 2]
+    th = math.atan2(T[1, 0], T[0, 0])
+    return x, y, th
+
 # Node class for A*
 class Node:
-    def __init__(self, x, y, theta, cost, parent, actions=None):
-        if actions is None:
-            actions = []
-        self.x = x; self.y = y; self.theta = theta; self.cost = cost; self.parent = parent; self.actions = actions
+    def __init__(self, x, y, theta, cost, parent, action):
+        self.x = x; self.y = y; self.theta = theta; self.cost = cost; self.parent = parent; self.action = action
     def __lt__(self, other): return self.cost < other.cost  # Defining comparision
 
 # Heuristic (Euclidean + angle)
@@ -110,11 +120,13 @@ def a_star(start, goal, grid, dist_map, res):
         if abs(cur.x - goal.x) < tol_px and abs(cur.y - goal.y) < tol_px and abs(cur.theta - goal.theta) < tol_angle:
             rospy.loginfo('Found path after %d iterations', i)
             path = []
-            action_path = cur.actions
+            action_path = []
             while cur:
-                path.append(cur)
+                path.append((cur.x, cur.y, cur.theta))
+                if cur.action:
+                    action_path.append(cur.action)
                 cur = cur.parent
-            return path[::-1], action_path
+            return path[::-1], action_path[::-1]
         # expand
         for v, w, c in actions:
             new_theta = cur.theta + w
@@ -128,7 +140,7 @@ def a_star(start, goal, grid, dist_map, res):
             if not is_collision(nx, ny, grid):
                 pen = proximity_penalty(dist_map, nx, ny)
                 nc = cur.cost + c + pen
-                node = Node(nx, ny, new_theta, nc, cur, cur.actions+[(v, w)])
+                node = Node(nx, ny, new_theta, nc, cur, (v, w))
                 f = nc + heuristic(node, goal)
                 heapq.heappush(open_list, (f, node))
     return []
@@ -149,6 +161,10 @@ class AStarPlannerNode(object):
         self.height, self.width = raster.shape
         self.grid = threshold_map(raster)
         self.dist_map = distance_transform_edt(self.grid == 0)
+        origin_x, origin_y, origin_th = m['origin']
+        self.T_wo = np.array([[1.0,0.0,-origin_x/self.res], [0.0,-1.0,-origin_y/self.res],[0,0,1]])
+        self.T_oi = np.array([[1.0,0.0,0.0], [0.0,1.0,0.0],[0.0,0.0,1.0]])
+        self.T_ir = np.array([[1.0,0.0,0.0], [0.0,1.0,0.0],[0.0,0.0,1.0]])
         # publishers and subscribers
         self.path_pub = rospy.Publisher('planned_path', Path, queue_size=1)
         self.cmd_pub = rospy.Publisher('cmd_vel', Twist, queue_size=1)
@@ -166,7 +182,7 @@ class AStarPlannerNode(object):
             amcl.pose.pose.orientation.y,
             amcl.pose.pose.orientation.z,
             amcl.pose.pose.orientation.w])
-        origin_x, origin_y, origin_th = wx_s, wy_s, 0.0
+        self.T_oi = T_from_pose(wx_s/self.res,wy_s/self.res,th_s)
         wx_g = msg.pose.position.x
         wy_g = msg.pose.position.y
         _, _, th_g = tf.transformations.euler_from_quaternion([
@@ -174,13 +190,22 @@ class AStarPlannerNode(object):
             msg.pose.orientation.y,
             msg.pose.orientation.z,
             msg.pose.orientation.w])
+        odom = rospy.wait_for_message('odom_combined', PoseWithCovarianceStamped)
+        wx_odom = odom.pose.pose.position.x
+        wy_odom = odom.pose.pose.position.y
+        _, _, th_odom = tf.transformations.euler_from_quaternion([
+            odom.pose.pose.orientation.x,
+            odom.pose.pose.orientation.y,
+            odom.pose.pose.orientation.z,
+            odom.pose.pose.orientation.w])
+        self.T_ir = T_from_pose(wx_odom/self.res, wy_odom/self.res, th_odom)
         # convert to map indices
-        ix_s, iy_s = world_to_map(wx_s, wy_s, origin_x, origin_y, self.res, self.height)
-        ix_g, iy_g = world_to_map(wx_g, wy_g, origin_x, origin_y, self.res, self.height)
+        ix_s, iy_s = world_to_map(wx_s, wy_s, self.origin_x, self.origin_y, self.res, self.height)
+        ix_g, iy_g = world_to_map(wx_g, wy_g, self.origin_x, self.origin_y, self.res, self.height)
         start = Node(ix_s, iy_s, th_s, 0, None)
         goal = Node(ix_g, iy_g, th_g, 0, None)
         curr = Node(ix_s, iy_s, th_s, 0, None)
-        rospy.loginfo("[A*] start=(%d,%d,%.2f) goal=(%d,%d,%.2f)", ix_s, iy_s, th_s, ix_g, iy_g, th_g)
+        rospy.loginfo("[A*] start=(%d, %d, %.2f) goal=(%d, %d, %.2f)", ix_s, iy_s, th_s, ix_g, iy_g, th_g)
         # MPC time
         path_actions_mpc = []
         horizon = 4
@@ -194,6 +219,7 @@ class AStarPlannerNode(object):
                 twist.angular.z = -a[1]*1.2
                 self.cmd_pub.publish(twist)
                 rospy.sleep(2.0)
+            # Update current position from odometry
             odom = rospy.wait_for_message('odom_combined', PoseWithCovarianceStamped)
             wx_c = odom.pose.pose.position.x
             wy_c = odom.pose.pose.position.y
@@ -202,7 +228,9 @@ class AStarPlannerNode(object):
                 odom.pose.pose.orientation.y,
                 odom.pose.pose.orientation.z,
                 odom.pose.pose.orientation.w])
-            ix, iy = world_to_map(wx_c, wy_c, origin_x, origin_y, self.res, self.height)
+            self.T_ir = T_from_pose(wx_c/self.res, wy_c/self.res, th_c)
+            ix, iy, th_c = pose_from_T(self.T_wo*self.T_oi*self.T_ir)
+            rospy.loginfo("[MPCA*] Current=(%d, %d, %.2f)")
             curr = Node(ix, iy, th_c, 0, None)
         rospy.loginfo("[MPCA*] Done.")
 
