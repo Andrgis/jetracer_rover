@@ -262,7 +262,7 @@ class AStarPlannerNode(object):
                 odom.pose.pose.orientation.w])
             self.T_ir = T_from_pose(wx_c/self.res, wy_c/self.res, th_c)
             ix, iy, th_c = pose_from_T(self.T_wo*self.T_oi*self.T_ir)
-            rospy.loginfo("[MPCA*] Current=(%d, %d, %.2f)")
+            rospy.loginfo("[MPCA*] Current=(%d, %d, %.2f)", ix, iy, th_c)
             curr = Node(ix, iy, th_c, 0, None, None)
         rospy.loginfo("[MPCA*] Done.")
 
