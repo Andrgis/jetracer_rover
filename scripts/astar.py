@@ -275,7 +275,7 @@ class AStarPlannerNode(object):
             for a in path_actions_mpc:
                 twist = Twist()
                 twist.linear.x = a[0] * self.res
-                twist.angular.z = -a[1]  # Note: may need sign adjustment based on your robot
+                twist.angular.z = a[1]  # Note: may need sign adjustment based on your robot
                 self.cmd_pub.publish(twist)
                 rospy.sleep(2.0)
 
