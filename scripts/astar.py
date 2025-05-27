@@ -193,8 +193,8 @@ class AStarPlannerNode(object):
         self.height, self.width = raster.shape
         self.grid = threshold_map(raster)
         self.dist_map = distance_transform_edt(self.grid == 0)
-        origin_x, origin_y, origin_th = m['origin']
-        self.T_wo = np.array([[1.0,0.0,-origin_x/self.res], [0.0,-1.0,-origin_y/self.res],[0,0,1]])
+        self.origin_x, self.origin_y, self.origin_th = m['origin']
+        self.T_wo = np.array([[1.0,0.0,-self.origin_x/self.res], [0.0,-1.0,-self.origin_y/self.res],[0,0,1]])
         self.T_oi = np.array([[1.0,0.0,0.0], [0.0,1.0,0.0],[0.0,0.0,1.0]])
         self.T_ir = np.array([[1.0,0.0,0.0], [0.0,1.0,0.0],[0.0,0.0,1.0]])
         # publishers and subscribers
@@ -247,7 +247,7 @@ class AStarPlannerNode(object):
             rospy.loginfo("[MPCA*] actions planned: %s", path_actions[:horizon])
             for a in path_actions[:horizon]:
                 twist = Twist()
-                twist.linear.x = a[0] * self.res
+                twist.linear.x = a[0] * self.res *1.05
                 twist.angular.z = -a[1]
                 self.cmd_pub.publish(twist)
                 rospy.sleep(2.0)
