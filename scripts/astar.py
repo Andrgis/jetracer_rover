@@ -72,8 +72,28 @@ class Node:
     def __lt__(self, other): return self.cost < other.cost  # Defining comparision
 
 # Heuristic (Euclidean + angle)
-def heuristic(n, g):
-    return math.hypot(g.x - n.x, g.y - n.y) + abs(g.theta - n.theta)
+def heuristic(node, goal, h_weight=1.1):
+    # Simplified Reeds-Shepp for common cases
+    dx = goal.x - node.x
+    dy = goal.y - node.y
+    dtheta = (goal.theta - node.theta + math.pi) % (2 * math.pi) - math.pi
+
+    dist = math.hypot(dx, dy)
+
+    # If we're already pointing roughly toward goal
+    target_angle = math.atan2(dy, dx)
+    angle_to_target = (target_angle - node.theta + math.pi) % (2 * math.pi) - math.pi
+
+    # Estimate minimum path considering turns
+    turn_radius = 10.0  # Adjust based on your robot's turning radius
+
+    if abs(angle_to_target) < 0.1:  # Nearly aligned
+        return dist + abs(dtheta) * turn_radius * h_weight
+    else:
+        # Need to turn, move, then align
+        turn_cost = abs(angle_to_target) * turn_radius
+        final_turn_cost = abs(dtheta) * turn_radius
+        return turn_cost + dist + final_turn_cost * h_weight
 
 def proximity_penalty(dist_map, x, y):
     clearance = 10.0; w = 20.0
@@ -90,35 +110,46 @@ def is_collision(x, y, grid):
 def a_star(start, goal, grid, dist_map, res):
     # action definitions
     rospy.loginfo('Running A* path planning')
-    ang_vel = 0.5
-    swing_vel = 0.2 / res
+    ang_vel = 0.6
+    turn_radius = 0.5/res
+    swing_vel = turn_radius*ang_vel
     vel = 0.5 / res
-    cost_scale = 1.0; back_penalty = 2.0; swing_penalty = 1.0
+    cost_scale = 1.0; back_penalty = 1.5; swing_penalty = 1.3
     actions = [
-        (vel, 0.0, vel * 0.5 * cost_scale), # forward
+        (vel, 0.0, vel * cost_scale), # forward
         (swing_vel, ang_vel, swing_vel * swing_penalty * cost_scale), # Left forward
         (swing_vel, -ang_vel, swing_vel * swing_penalty * cost_scale), # Right forward
-        (-vel, 0.0, back_penalty * vel * 0.5 * cost_scale), # backward
+        (-vel, 0.0, back_penalty * vel * cost_scale), # backward
         (-swing_vel, ang_vel, back_penalty * swing_vel * swing_penalty * cost_scale), # Right backward
         (-swing_vel, -ang_vel, back_penalty * swing_vel * swing_penalty * cost_scale) # Left backward
     ]
-    tol_px = 0.5 / res
+    tol_px = 0.25 / res
     tol_angle = 0.6
     open_list = []
     heapq.heappush(open_list, (0, start))
     closed = set()
     max_iter = 200000
     i = 0
+    initial_dist = math.hypot(start.x - goal.x, start.y - goal.y)
     while open_list and i < max_iter:
-        i += 1
         _, cur = heapq.heappop(open_list)
         key = (cur.x//4, cur.y//4, (cur.theta*8)//(2*math.pi)%8)
         if key in closed:
             continue
         closed.add(key)
-        # goal check
-        if abs(cur.x - goal.x) < tol_px and abs(cur.y - goal.y) < tol_px and abs(cur.theta - goal.theta) < tol_angle:
-            rospy.loginfo('Found path after %d iterations', i)
+
+        # Add progress tracking
+        i += 1
+        if i % 1000 == 0:
+            best_dist = math.hypot(cur.x - goal.x, cur.y - goal.y)
+            if i > 50000 and best_dist > initial_dist * 0.8:  # Not making progress
+                rospy.loginfo("Search stalled, increasing tolerances by 50 %")
+                tol_px *= 1.5
+                tol_angle *= 1.5
+        # check if goal reached
+        angle_diff = abs((cur.theta - goal.theta + math.pi) % (2 * math.pi) - math.pi)
+        if abs(cur.x - goal.x) < tol_px and abs(cur.y - goal.y) < tol_px and angle_diff < tol_angle:
+            print('Found path after %d iterations', i)
             path = []
             action_path = []
             while cur:
@@ -130,6 +161,7 @@ def a_star(start, goal, grid, dist_map, res):
         # expand
         for v, w, c in actions:
             new_theta = cur.theta + w
+            new_theta = (new_theta + math.pi) % (2 * math.pi) - math.pi  # Normalize to [-π, π]
             if w == 0:
                 dx = v * math.cos(cur.theta)
                 dy = v * math.sin(cur.theta)
@@ -215,8 +247,8 @@ class AStarPlannerNode(object):
             rospy.loginfo("[MPCA*] actions planned: %s", path_actions[:horizon])
             for a in path_actions[:horizon]:
                 twist = Twist()
-                twist.linear.x = a[0] * self.res *1.14
-                twist.angular.z = -a[1]*1.2
+                twist.linear.x = a[0] * self.res
+                twist.angular.z = -a[1]
                 self.cmd_pub.publish(twist)
                 rospy.sleep(2.0)
             # Update current position from odometry
