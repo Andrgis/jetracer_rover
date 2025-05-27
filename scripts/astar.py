@@ -237,6 +237,7 @@ class AStarPlannerNode(object):
             amcl.pose.pose.orientation.y,
             amcl.pose.pose.orientation.z,
             amcl.pose.pose.orientation.w])
+        self.T_oi = T_from_pose(wx_s/self.res, wy_s/self.res, th_s)
 
         wx_g = msg.pose.position.x
         wy_g = msg.pose.position.y
@@ -275,7 +276,7 @@ class AStarPlannerNode(object):
             for a in path_actions_mpc:
                 twist = Twist()
                 twist.linear.x = a[0] * self.res
-                twist.angular.z = a[1]  # Note: may need sign adjustment based on your robot
+                twist.angular.z = a[1]
                 self.cmd_pub.publish(twist)
                 rospy.sleep(2.0)
 
@@ -288,11 +289,13 @@ class AStarPlannerNode(object):
                 odom.pose.pose.orientation.y,
                 odom.pose.pose.orientation.z,
                 odom.pose.pose.orientation.w])
-
+            self.T_ir = T_from_pose(wx_c/self.res, wy_c/self.res, th_c)
             rospy.loginfo("[Odom] Current=(%.3f, %.3f, %.2f)", wx_c, wy_c, th_c)
 
             # Convert back to map coordinates
-            ix_c, iy_c = world_to_map(wx_c, wy_c, self.origin_x, self.origin_y, self.res, self.height)
+            T_wi = np.dot(self.T_wo, self.T_oi)
+            T_wr = np.dot(T_wi, self.T_ir)
+            ix_c, iy_c, th_c = pose_from_T(T_wr)
             rospy.loginfo("[MPCA*] Current=(%d, %d, %.2f)", ix_c, iy_c, th_c)
             curr = Node(ix_c, iy_c, th_c, 0, None, None)
 
