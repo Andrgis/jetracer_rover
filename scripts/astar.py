@@ -234,9 +234,9 @@ class AStarPlannerNode(object):
         # convert to map indices
         ix_s, iy_s = world_to_map(wx_s, wy_s, self.origin_x, self.origin_y, self.res, self.height)
         ix_g, iy_g = world_to_map(wx_g, wy_g, self.origin_x, self.origin_y, self.res, self.height)
-        start = Node(ix_s, iy_s, th_s, 0, None)
-        goal = Node(ix_g, iy_g, th_g, 0, None)
-        curr = Node(ix_s, iy_s, th_s, 0, None)
+        start = Node(ix_s, iy_s, th_s, 0, None, None)
+        goal = Node(ix_g, iy_g, th_g, 0, None, None)
+        curr = Node(ix_s, iy_s, th_s, 0, None, None)
         rospy.loginfo("[A*] start=(%d, %d, %.2f) goal=(%d, %d, %.2f)", ix_s, iy_s, th_s, ix_g, iy_g, th_g)
         # MPC time
         path_actions_mpc = []
@@ -263,7 +263,7 @@ class AStarPlannerNode(object):
             self.T_ir = T_from_pose(wx_c/self.res, wy_c/self.res, th_c)
             ix, iy, th_c = pose_from_T(self.T_wo*self.T_oi*self.T_ir)
             rospy.loginfo("[MPCA*] Current=(%d, %d, %.2f)")
-            curr = Node(ix, iy, th_c, 0, None)
+            curr = Node(ix, iy, th_c, 0, None, None)
         rospy.loginfo("[MPCA*] Done.")
 
         #if not path_states:
