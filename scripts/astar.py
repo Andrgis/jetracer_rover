@@ -35,7 +35,14 @@ def read_pgm(pgmf):
         depth_line = pgmf.readline().decode('ascii')
     maxval = int(depth_line)
     data = np.frombuffer(pgmf.read(), dtype=np.uint8)
-    return data.reshape((height, width))
+
+    # Reshape the data into a 2D array (height, width)
+    image_array = data.reshape((height, width))
+
+    # Flip the image vertically (around the horizontal axis)
+    flipped_image_array = np.flipud(image_array)
+
+    return flipped_image_array
 
 def threshold_map(raster):
     # treat values >250 as free (0), else occupied (1)
