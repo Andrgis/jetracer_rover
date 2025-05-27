@@ -231,13 +231,14 @@ class AStarPlannerNode(object):
             odom.pose.pose.orientation.z,
             odom.pose.pose.orientation.w])
         self.T_ir = T_from_pose(wx_odom/self.res, wy_odom/self.res, th_odom)
+        T_wi = np.dot(self.T_wo,self.T_oi)
         # convert to map indices
         ix_s, iy_s = world_to_map(wx_s, wy_s, self.origin_x, self.origin_y, self.res, self.height)
         ix_g, iy_g = world_to_map(wx_g, wy_g, self.origin_x, self.origin_y, self.res, self.height)
         start = Node(ix_s, iy_s, th_s, 0, None, None)
         goal = Node(ix_g, iy_g, th_g, 0, None, None)
         curr = Node(ix_s, iy_s, th_s, 0, None, None)
-        rospy.loginfo("[AMCL & msg] start_raw=(%d, %d, %.2f) goal_raw=(%d, %d, %.2f)", wx_s, wy_s, th_s, wx_g, wy_g, th_g)
+        rospy.loginfo("[AMCL & msg] start_raw=(%.3f, %.3f, %.2f) goal_raw=(%.3f, %.3f, %.2f)", wx_s, wy_s, th_s, wx_g, wy_g, th_g)
         rospy.loginfo("[Odom] curr = (%d, %d, %.2f)", wx_odom, wy_odom, th_odom)
         rospy.loginfo("[A*] start=(%d, %d, %.2f) goal=(%d, %d, %.2f)", ix_s, iy_s, th_s, ix_g, iy_g, th_g)
         # MPC time
@@ -263,8 +264,9 @@ class AStarPlannerNode(object):
                 odom.pose.pose.orientation.z,
                 odom.pose.pose.orientation.w])
             self.T_ir = T_from_pose(wx_c/self.res, wy_c/self.res, th_c)
-            rospy.loginfo("[Odom] Current=(%d, %d, %.2f)", wx_c, wy_c, th_c)
-            ix, iy, th_c = pose_from_T(self.T_wo*self.T_oi*self.T_ir)
+            T_wr = np.dot(T_wi, self.T_ir)
+            rospy.loginfo("[Odom] Current=(%.3f, %.3f, %.2f)", wx_c, wy_c, th_c)
+            ix, iy, th_c = pose_from_T(T_wr)
             rospy.loginfo("[MPCA*] Current=(%d, %d, %.2f)", ix, iy, th_c)
             curr = Node(ix, iy, th_c, 0, None, None)
         rospy.loginfo("[MPCA*] Done.")
