@@ -133,7 +133,7 @@ def a_star(start, goal, grid, dist_map, res):
     initial_dist = math.hypot(start.x - goal.x, start.y - goal.y)
     while open_list and i < max_iter:
         _, cur = heapq.heappop(open_list)
-        key = (cur.x//4, cur.y//4, (cur.theta*8)//(2*math.pi)%8)
+        key = (cur.x//2, cur.y//2, (cur.theta*12)//(2*math.pi)%12)
         if key in closed:
             continue
         closed.add(key)
@@ -237,6 +237,8 @@ class AStarPlannerNode(object):
         start = Node(ix_s, iy_s, th_s, 0, None, None)
         goal = Node(ix_g, iy_g, th_g, 0, None, None)
         curr = Node(ix_s, iy_s, th_s, 0, None, None)
+        rospy.loginfo("[AMCL & msg] start_raw=(%d, %d, %.2f) goal_raw=(%d, %d, %.2f)", wx_s, wy_s, th_s, wx_g, wy_g, th_g)
+        rospy.loginfo("[Odom] curr = (%d, %d, %.2f)", wx_odom, wy_odom, th_odom)
         rospy.loginfo("[A*] start=(%d, %d, %.2f) goal=(%d, %d, %.2f)", ix_s, iy_s, th_s, ix_g, iy_g, th_g)
         # MPC time
         path_actions_mpc = []
@@ -247,7 +249,7 @@ class AStarPlannerNode(object):
             rospy.loginfo("[MPCA*] actions planned: %s", path_actions[:horizon])
             for a in path_actions[:horizon]:
                 twist = Twist()
-                twist.linear.x = a[0] * self.res *1.05
+                twist.linear.x = a[0] * self.res
                 twist.angular.z = -a[1]
                 self.cmd_pub.publish(twist)
                 rospy.sleep(2.0)
@@ -261,6 +263,7 @@ class AStarPlannerNode(object):
                 odom.pose.pose.orientation.z,
                 odom.pose.pose.orientation.w])
             self.T_ir = T_from_pose(wx_c/self.res, wy_c/self.res, th_c)
+            rospy.loginfo("[Odom] Current=(%d, %d, %.2f)", wx_c, wy_c, th_c)
             ix, iy, th_c = pose_from_T(self.T_wo*self.T_oi*self.T_ir)
             rospy.loginfo("[MPCA*] Current=(%d, %d, %.2f)", ix, iy, th_c)
             curr = Node(ix, iy, th_c, 0, None, None)
