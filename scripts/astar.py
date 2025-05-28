@@ -302,7 +302,10 @@ class AStarPlannerNode(object):
             for a in path_actions_mpc:
                 twist = Twist()
                 twist.linear.x = a[0] * self.res    # Convert back to m/s
-                twist.angular.z = a[1]              # rad/s
+                if a[0]>0:
+                    twist.angular.z = a[1]             # rad/s
+                else:
+                    twist.angular.z = -a[1]
                 self.cmd_pub.publish(twist)
                 rospy.sleep(2.0)
 
