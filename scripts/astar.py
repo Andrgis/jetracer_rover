@@ -107,7 +107,7 @@ def heuristic(node, goal, h_weight=1.1):
 def proximity_penalty(dist_map, x, y):
     """Add cost penalty for being close to obstacles"""
     clearance = 10.0; w = 20.0
-    row = int(y)
+    row = int(dist_map.shape[0] - 1 - y)
     col = int(x)
     if row < 0 or col < 0 or row >= dist_map.shape[0] or col >= dist_map.shape[1]:
         return w  # High penalty for out of bounds
@@ -229,7 +229,7 @@ class AStarPlannerNode(object):
         self.height, self.width = raster.shape
 
         # Preparing map
-        self.grid = threshold_map(raster)  # Making walls 0 and open space 1
+        self.grid = np.flipud(threshold_map(raster))  # Making walls 0 and open space 1
         self.dist_map = distance_transform_edt(self.grid == 0)  # Distance to nearest obstacle
 
         self.origin_x, self.origin_y, self.origin_th = m['origin']
